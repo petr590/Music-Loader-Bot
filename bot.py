@@ -2,12 +2,12 @@
 import os
 import re
 import dotenv
-import requests
-import urllib.parse
+import traceback
 
 from telebot import TeleBot, types
-from bs4 import BeautifulSoup
-from typing import List, Dict, Optional
+from typing import List, Dict, Tuple, Optional
+from tracks import Track, load_tracks
+from file_processor import process
 
 
 def init_dotenv():
@@ -18,7 +18,7 @@ def init_dotenv():
 
 
 # Определяет формат '<author> - <name>', возвращает <author> в \1, <name> в \2
-AUTHOR_NAME_REGEX = re.compile(r'^(.+?)[ \t]+-[ \t]+(.+)$')
+AUTHOR_NAME_REGEX = re.compile(r'^(.+?)[ \t]+[-−–—][ \t]+(.+)$')
 
 # Определяет текст в кавычках или до ближайшего двоеточия
 VALUE_PATTERN = r'("[^"]+"|[^:"]+?)(?=$|,\s*[a-z]+\s*:)'
@@ -30,78 +30,7 @@ AUTHOR_REGEX = re.compile(rf'\b(?:author|a)\s*:\s*{VALUE_PATTERN}', re.I)
 NAME_REGEX = re.compile(rf'\b(?:name|n|title|t)\s*:\s*{VALUE_PATTERN}', re.I)
 
 
-HEADERS = {
-	'Accept': 'text/html',
-	'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_3_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
-}
-
-
-class Track:
-	_cache: Dict[int, str] = {}
-
-	def __init__(self, url: str, name: str, author: str, duration: str):
-		self.url = url
-		self.name = name
-		self.author = author
-		self.duration = duration
-		Track._cache[id(self)] = self
-	
-	@property
-	def id(self) -> int:
-		return id(self)
-
-
-	@staticmethod
-	def get_cached(id: int) -> Optional['Track']:
-		return Track._cache.get(id)
-	
-	def get_text(self) -> str:
-		return f'{self.author}   ⸺   {self.name}   ⸺   {self.duration}'
-
-
-def add_tracks(tracks: List[Track], req_author: Optional[str], req_name: Optional[str], url: str) -> BeautifulSoup:
-	response = requests.get(url, HEADERS)
-	soup = BeautifulSoup(response.text, 'lxml')
-
-	for tag in soup.find_all('div', {'itemprop': 'track'}):
-		href = tag.find('a', {'itemprop': 'url'})['href']
-
-		name: str = tag.find('span', {'class': 'title', 'itemprop': 'name'}).get_text()
-		if req_name is not None and name.lower().find(req_name.lower()) == -1:
-			continue
-
-		author = tag.find('span', {'class': 'autor', 'itemprop': 'byArtist'}).get_text()
-		if req_author is not None and author.lower().find(req_author.lower()) == -1:
-			continue
-
-		time = tag.find('span', {'class': 'd'}).get_text()
-
-		tracks.append(Track(href, name, author, time))
-	
-	return soup
-
-
-def load_tracks(request: str, req_author: Optional[str], req_name: Optional[str]) -> List[Track]:
-	""" Возвращает список треков по запросу """
-
-	tracks = []
-	url = 'https://web.ligaudio.ru/mp3/' + urllib.parse.quote(request, safe='')
-
-	soup = add_tracks(tracks, req_author, req_name, url)
-
-	pagination = soup.find('div', {'class': 'pagination'})
-
-	if pagination is not None:
-		for link in pagination.find_all('a'):
-			if 'this' not in link.get_attribute_list('class'):
-				add_tracks(tracks, req_author, req_name, 'https://web.ligaudio.ru' + link['href'])
-
-	
-	print(f'Found {len(tracks)} tracks on page {url}')
-	return tracks
-
-
-def get_request_author_and_name(text: str):
+def get_request_author_and_name(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
 	""" Возвращает запрос, автора и назнание по сообщению пользователя """
 
 	match = re.search(AUTHOR_NAME_REGEX, text)
@@ -121,7 +50,7 @@ def get_request_author_and_name(text: str):
 
 	if author is not None and name is not None:
 		request = f'{author} {name}'
-	elif author is not None:
+	else:
 		request = author if author != None else name
 	
 	return request, author, name
@@ -167,20 +96,23 @@ class TrackPool:
 		return str(id(self)) + '_show_more'
 
 
-track_pool: TrackPool = None
+track_pools: Dict[int, TrackPool] = {}
 
 def handle_message(message: types.Message, bot: TeleBot):
 	if message.text is None or message.text == '':
 		return
 
-	global track_pool
-	track_pool = TrackPool(load_tracks(*get_request_author_and_name(message.text)))
-	track_pool.print_next(bot, message.chat.id)
+	pool = TrackPool(load_tracks(*get_request_author_and_name(message.text)))
+	pool.print_next(bot, message.chat.id)
+
+	track_pools[message.chat.id] = pool
 
 
 def handle_callback(query: types.CallbackQuery, bot: TeleBot):
-	if track_pool is not None and query.data == track_pool.key_show_more:
-		track_pool.print_next(bot, query.message.chat.id)
+	chat_id = query.message.chat.id
+
+	if chat_id in track_pools and query.data == track_pools[chat_id].key_show_more:
+		track_pools[chat_id].print_next(bot, chat_id)
 		return
 
 	if not query.data.isdigit():
@@ -189,9 +121,12 @@ def handle_callback(query: types.CallbackQuery, bot: TeleBot):
 	track = Track.get_cached(int(query.data))
 	if track is None:
 		return
-	
-	# TODO
-	print(track.url)
+
+	try:
+		process(track, bot, chat_id)
+	except:
+		traceback.print_exc()
+		bot.send_message(chat_id, 'Ошибка при обработке файла')
 
 
 def help(message: types.Message, bot: TeleBot):
@@ -203,9 +138,10 @@ def help(message: types.Message, bot: TeleBot):
 		- <b><u>author:&lt;автор&gt;, title:&lt;название&gt;</u></b> - выполняет поиск по автору и названию. Вы можете заменить <b><u>author:</u></b> на <b><u>a:</u></b>, а <b><u>title:</u></b> на <b><u>name:</u></b>, <b><u>t:</u></b> или <b><u>n:</u></b>. Вы также можете указать только автора или название.
 
 		При поиске регистр не учитывается.
+
 		<b>Примеры:</b>
 		- <b><u>Kanaria</u></b> - ищет все песни исполнителя Kanaria
-		- <b><u>kanaria - identity</u></b> - ищет все песню Identity исполнителя Kanaria
+		- <b><u>kanaria - identity</u></b> - ищет песню Identity исполнителя Kanaria
 		- <b><u>author: kanaria, title: identity</u></b> - то же самое
 		- <b><u>t:identity, a:kanaria</u></b> - то же самое
 		- <b><u>title: "name:with:colons"</u></b> - ищет песню с названием name:with:colons, кавычки в данном случае обязательны.
