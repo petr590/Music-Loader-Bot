@@ -1,17 +1,22 @@
 import requests
 import tempfile
 import os.path
+import logging
 
 from mutagen.easyid3 import EasyID3
 from pydub import AudioSegment
 from pydub.utils import mediainfo
 from telebot import TeleBot
+
 from tracks import Track, HEADERS
 from util import Timer
 
 
 TARGET_BITRATE = 192000
 TARGET_FORMAT = 'mp3'
+MAX_TRIES = 3
+
+logger = logging.getLogger()
 
 def process(track: Track, bot: TeleBot, chat_id: int) -> None:
 	""" Скачивает трек по ссылке, затем преобразовывает его в формат TARGET_FORMAT,
@@ -28,7 +33,7 @@ def process(track: Track, bot: TeleBot, chat_id: int) -> None:
 	response = requests.get(track.url, headers=HEADERS)
 
 	if not response.ok:
-		print(f'Server returned status {response.status_code} on request {track.url}')
+		logger.warning(f'Server returned status {response.status_code} on request {track.url}')
 		bot.delete_message(chat_id, message_id)
 		bot.send_message(chat_id, 'Ошибка при скачавании файла')
 		return
@@ -60,9 +65,20 @@ def process(track: Track, bot: TeleBot, chat_id: int) -> None:
 		id3.save()
 		timer.stop('Metadata writing')
 
+
 		timer.start()
-		file.seek(0)
-		bot.send_audio(chat_id, file)
+
+		for trying in range(MAX_TRIES):
+			try:
+				file.seek(0)
+				bot.send_audio(chat_id, file)
+				break
+			except requests.exceptions.ConnectionError as error:
+				if trying == MAX_TRIES - 1:
+					raise error
+				else:
+					logger.warning('Caugth requests.exceptions.ConnectionError, retrying...')
+
 		timer.stop('Audio sending')
 		
 		bot.delete_message(chat_id, message_id)
