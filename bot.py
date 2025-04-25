@@ -7,16 +7,15 @@ import logging
 from telebot import TeleBot, types
 from typing import Dict, Optional
 
-import database
+from musbot import database
+from musbot.setup import setup
+from musbot.tracks import Track, TrackPool, button_events
+from musbot.track_loader import load_tracks
+from musbot.track_processor import process_track
+from musbot.util import get_request_title_and_author, wrap_try_except
 
-from setup import setup
-from tracks import Track, TrackPool, button_events
-from track_loader import load_tracks
-from track_processor import process_track
-from util import get_request_title_and_author, wrap_try_except
 
-
-HELP_MESSAGE = '''
+START_MESSAGE = '''
 	Music Loader - бот для скачивания музыки с сайтов.
 	<b>Поддерживаемые сайты:</b>
 	- www.ligaudio.ru
@@ -41,7 +40,7 @@ HELP_MESSAGE = '''
 	Фильтр дополнительно фильтрует результат поиска сайтов, так как они могут выдавать много лишних результатов. Фильтр можно включить и отключить командами /filteron и  /filteroff. По умолчанию он включен.
 
 	<b>Список треков</b>
-	Команда /list выводит все скачанные треки. Ей можно передать строку в таком же формате, как и для поиска. При клике на трек можно изменить автора или название или удалить трек из базы.
+	Команда /list выводит все скачанные треки. Ей можно передать строку в таком же формате, как и для поиска. При клике на трек можно изменить автора, название или удалить трек из базы.
 '''.replace('\t', '')
 
 
@@ -78,10 +77,10 @@ def main() -> None:
 
 	# -------------------------------------------------- Commands --------------------------------------------------
 
-	@bot.message_handler(commands=['start', 'help'])
+	@bot.message_handler(commands=['start'])
 	@wrap_try_except(bot)
-	def help(message: types.Message) -> None:
-		bot.send_message(message.chat.id, HELP_MESSAGE, parse_mode='HTML')
+	def start(message: types.Message) -> None:
+		bot.send_message(message.chat.id, START_MESSAGE, parse_mode='HTML')
 
 
 	@bot.message_handler(commands=['stop'])
@@ -106,8 +105,8 @@ def main() -> None:
 
 
 	# -------------------------------------------------- /list --------------------------------------------------
-
-	COMMAND_REGEX = re.compile(r'^/list\s*')
+	
+	COMMAND_REGEX = re.compile(r'^/\w+\s*')
 
 	def edit_author(track: Track, message: types.Message):
 		track.author = message.text
@@ -214,7 +213,7 @@ def main() -> None:
 			state.current_action = action
 			bot.send_message(message.chat.id, action['begin_message'], reply_markup=action['keyboard'])
 		else:
-			action['callback'](state.current_track, message)
+			action['callback'](state.current_track, message, reply_markup=types.ReplyKeyboardRemove())
 			state.current_track = None
 	
 
@@ -228,7 +227,6 @@ def main() -> None:
 		state.current_action = None
 		
 		bot.send_message(message.chat.id, end_message, reply_markup=types.ReplyKeyboardRemove())
-
 
 
 	# -------------------------------------------------- messages --------------------------------------------------

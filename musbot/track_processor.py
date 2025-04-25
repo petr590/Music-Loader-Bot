@@ -8,8 +8,8 @@ from pydub import AudioSegment
 from pydub.utils import mediainfo
 from telebot import TeleBot
 
-from tracks import Track
-from util import Timer, HEADERS, add_scheme
+from .tracks import Track
+from .util import Timer, HEADERS, add_scheme
 
 
 TARGET_BITRATE = 192000

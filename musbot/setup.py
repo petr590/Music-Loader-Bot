@@ -6,7 +6,7 @@ import logging
 from systemd.journal import JournalHandler
 
 def setup():
-	path = os.path.join(os.path.dirname(__file__), '.env')
+	path = os.path.join(os.path.dirname(__file__), '..', '.env')
 
 	if os.path.exists(path):
 		dotenv.load_dotenv(path)

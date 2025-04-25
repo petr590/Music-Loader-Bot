@@ -2,7 +2,8 @@ import re
 
 from telebot import TeleBot, types
 from typing import List, Dict, Optional, Callable
-from util import word_form_by_num
+
+from .util import word_form_by_num
 
 
 # Символы, запрещённые в именах файлов

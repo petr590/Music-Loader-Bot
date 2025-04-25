@@ -7,8 +7,8 @@ from bs4 import BeautifulSoup, Tag
 from typing import List, Dict, Optional, Callable
 from abc import abstractmethod
 
-from tracks import Track
-from util import HEADERS
+from .tracks import Track
+from .util import HEADERS
 
 # Удаляет '//', 'http://' и 'https://' в начале строки, если есть, и добавляет 'https://'
 HREF_REGEX = re.compile(r'^((https?:)?//)?')

@@ -4,8 +4,8 @@ import psycopg2
 from telebot.types import User
 from typing import List, Optional
 
-from tracks import Track
-from util import remove_scheme
+from .tracks import Track
+from .util import remove_scheme
 
 def init() -> None:
 	global connection, cursor
