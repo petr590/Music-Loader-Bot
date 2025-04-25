@@ -1,7 +1,7 @@
 import re
 
-from bot import AUTHOR_NAME_REGEX, AUTHOR_REGEX, NAME_REGEX
-from tracks import FORBIDDEN_CHARS
+from util import AUTHOR_NAME_REGEX, AUTHOR_REGEX, TITLE_REGEX, add_scheme, remove_scheme
+from tracks import FORBIDDEN_CHARS_REGEX
 
 if __name__ == '__main__':
 	assert re.sub(AUTHOR_NAME_REGEX, r'\1 | \2', 'ABC - DEF - GHI') == 'ABC | DEF - GHI'
@@ -15,20 +15,31 @@ if __name__ == '__main__':
 	assert re.search(AUTHOR_REGEX, 'author : "string: with: colons"').groups()[0] == '"string: with: colons"'
 	assert re.search(AUTHOR_REGEX, 'a:"string: with: colons"').groups()[0] == '"string: with: colons"'
 
-	assert re.search(NAME_REGEX, 'author:Kanaria,name:Brain').groups()[0] == 'Brain'
-	assert re.search(NAME_REGEX, 'title:Brain,author:Kanaria').groups()[0] == 'Brain'
-	assert re.search(NAME_REGEX, 'n:Brain').groups()[0] == 'Brain'
+	assert re.search(TITLE_REGEX, 'author:Kanaria,name:Brain').groups()[0] == 'Brain'
+	assert re.search(TITLE_REGEX, 'title:Brain,author:Kanaria').groups()[0] == 'Brain'
+	assert re.search(TITLE_REGEX, 'n:Brain').groups()[0] == 'Brain'
 
-	assert re.search(NAME_REGEX, 'author:Kanaria,\n\t\r name:Brain').groups()[0] == 'Brain'
-	assert re.search(NAME_REGEX, 'name:\n Brain \t').groups()[0] == 'Brain'
-	assert re.search(NAME_REGEX, 'name: "Brain" \t').groups()[0] == '"Brain"'
-	assert re.search(NAME_REGEX, 'name: "Brain \t"').groups()[0] == '"Brain \t"'
+	assert re.search(TITLE_REGEX, 'author:Kanaria,\n\t\r name:Brain').groups()[0] == 'Brain'
+	assert re.search(TITLE_REGEX, 'name:\n Brain \t').groups()[0] == 'Brain'
+	assert re.search(TITLE_REGEX, 'name: "Brain" \t').groups()[0] == '"Brain"'
+	assert re.search(TITLE_REGEX, 'name: "Brain \t"').groups()[0] == '"Brain \t"'
 
 
 	MATCHING = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\\/:*?<>"'
 	NOT_MATCHING = ' !#$%&\'()+,-.0123456789;=@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{}~\x7f'
 
-	assert re.sub(FORBIDDEN_CHARS, '', MATCHING) == ''
-	assert re.search(FORBIDDEN_CHARS, NOT_MATCHING) is None
+	assert re.sub(FORBIDDEN_CHARS_REGEX, '', MATCHING) == ''
+	assert re.search(FORBIDDEN_CHARS_REGEX, NOT_MATCHING) is None
+
+
+	assert add_scheme('host/path?k=v')         == 'https://host/path?k=v'
+	assert add_scheme('https://host/path?k=v') == 'https://host/path?k=v'
+	assert add_scheme('ftp://host/path?k=v')   == 'ftp://host/path?k=v'
+	assert add_scheme('gg://host/path?k=v')    == 'gg://host/path?k=v'
+
+	assert remove_scheme('host/path?k=v')         == 'host/path?k=v'
+	assert remove_scheme('https://host/path?k=v') == 'host/path?k=v'
+	assert remove_scheme('ftp://host/path?k=v')   == 'host/path?k=v'
+	assert remove_scheme('gg://host/path?k=v')    == 'host/path?k=v'
 
 	print('SUCCESS')

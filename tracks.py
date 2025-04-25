@@ -1,147 +1,88 @@
-import urllib.parse
-import requests
 import re
-import logging
 
-from bs4 import BeautifulSoup, Tag
+from telebot import TeleBot, types
 from typing import List, Dict, Optional, Callable
-from abc import abstractmethod
+from util import word_form_by_num
 
-HEADERS = {
-	'Accept': 'text/html',
-	'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_3_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
-}
 
-FORBIDDEN_CHARS = re.compile(r'[\\|/:*?<>"\x00-\x1F]')
-HREF_REGEX = re.compile(r'^((https?:)?//)?')
+# Символы, запрещённые в именах файлов
+FORBIDDEN_CHARS_REGEX = re.compile(r'[\\|/:*?<>"\x00-\x1F]')
+FORBIDDEN_CHARS_REPL = '_'
 
-logger = logging.getLogger('root')
+button_events: Dict[str, Callable[[TeleBot, int, int], None]] = {}
 
 
 class Track:
-	__cache: Dict[int, str] = {}
-
-	def __init__(self, url: str, title: str, author: str, duration: str):
+	def __init__(self, url: str, title: str, author: str, duration: Optional[str] = None, id: Optional[int] = None):
 		self.url = url
 		self.title = title
 		self.author = author
 		self.duration = duration
-		Track.__cache[self.id] = self
+		self.id = id
 	
 	@property
-	def id(self) -> int:
-		return id(self)
+	def key(self) -> int:
+		return str(id(self))
 
-
-	@staticmethod
-	def get_cached(id: int) -> Optional['Track']:
-		return Track.__cache.get(id)
 	
 	def get_text(self) -> str:
-		return f'{self.author}   ⸺   {self.title}   ⸺   {self.duration}'
+		if self.duration is not None:
+			return f'{self.author}   ⸺   {self.title}   ⸺   {self.duration}'
+		else:
+			return f'{self.author}   ⸺   {self.title}'
 	
 	def get_filename(self) -> str:
-		return re.sub(FORBIDDEN_CHARS, '_', f'{self.author} - {self.title}')
+		return re.sub(FORBIDDEN_CHARS_REGEX, FORBIDDEN_CHARS_REPL, f'{self.author} - {self.title}')
 
 
-class TrackSource:
-	@abstractmethod
-	def add_tracks(self, tracks: List[Track], request: str, req_author: Optional[str], req_title: Optional[str]) -> None:
-		""" Добавляет треки в итоговый список """
+# Размер одной страницы при выводе списка треков
+PAGE_SIZE = 10
 
+class TrackPool:
+	""" Хранит список треков и номер последнего трека, показанного пользователю """
 
-Attrs = Dict[str, str]
+	def __init__(self, callback: Callable[[Track, TeleBot, int, int], None], tracks: List[Track]):
+		self.tracks = tracks
+		self.last_index = 0
+		self.message_id: Optional[int] = None
 
-class SimpleTrackSource(TrackSource):
-	def __init__(self, host: str, base: str,
-				 track_attrs: Attrs, link_attrs: Attrs, title_attrs: Attrs,
-				 author_attrs: Attrs, time_attrs: Attrs, pagination_attrs: Attrs,
-				 pagination_link_predicate: Callable[[Tag], bool]) -> None:
-		
-		self.host = host
-		self.base = base
-		self.track_attrs      = track_attrs
-		self.link_attrs       = link_attrs
-		self.title_attrs      = title_attrs
-		self.author_attrs     = author_attrs
-		self.time_attrs       = time_attrs
-		self.pagination_attrs = pagination_attrs
-		self.pagination_link_predicate = pagination_link_predicate
+		for track in tracks:
+			button_events[track.key] = lambda *args, _track = track: callback(_track, *args)
 	
-	def __add_tracks_from_page(self, tracks: List[Track], req_author: Optional[str], req_title: Optional[str], url: str) -> Optional[BeautifulSoup]:
-		""" Добавляет совпадающие треки в переданный список. Возвращает страницу. """
 
-		response = requests.get(url, HEADERS)
+	def print_next(self, bot: TeleBot, chat_id: int, *_):
+		""" Выводит следующую группу треков, а также кнопку для вывода следующей группы, если необходимо """
 
-		if not response.ok:
-			logger.warning(f'Server returned code {response.status_code} for GET {url}')
-			return None
+		markup = types.InlineKeyboardMarkup()
+		next_index = min(self.last_index + PAGE_SIZE, len(self.tracks))
+
+		for i in range(next_index):
+			track = self.tracks[i]
+			markup.add(types.InlineKeyboardButton(track.get_text(), callback_data=track.key))
 		
-		soup = BeautifulSoup(response.text, 'lxml')
+		if next_index < len(self.tracks):
+			next_count = min(PAGE_SIZE, len(self.tracks) - next_index)
+			markup.add(types.InlineKeyboardButton(f'Показать ещё {next_count}', callback_data=self.key))
+			button_events[self.key] = self.print_next
+		else:
+			button_events.pop(self.key, None)
 
-		for tag in soup.find_all(attrs=self.track_attrs):
-			href = re.sub(HREF_REGEX, 'https://', tag.find('a', self.link_attrs)['href'])
-
-			title = tag.find(attrs=self.title_attrs).get_text(strip=True)
-			if req_title is not None and title.lower().find(req_title.lower()) == -1:
-				continue
-
-			author = tag.find(attrs=self.author_attrs).get_text(strip=True)
-			if req_author is not None and author.lower().find(req_author.lower()) == -1:
-				continue
-
-			time = tag.find(attrs=self.time_attrs).get_text(strip=True)
-
-			tracks.append(Track(href, title, author, time))
+		self.last_index = next_index
 		
+		if self.message_id is None:
+			tracks_count = len(self.tracks)
+			
+			msg = word_form_by_num(tracks_count,
+					f'Найден {tracks_count} трек',
+					f'Найдены {tracks_count} трека',
+					f'Найдено {tracks_count} треков'
+			)
 
-	def add_tracks(self, tracks: List[Track], request: str, req_author: Optional[str], req_title: Optional[str]):
-		url = self.base + urllib.parse.quote(request, safe='')
-
-		soup = self.__add_tracks_from_page(tracks, req_author, req_title, url)
-		if soup is None: return
-
-		pagination = soup.find(attrs=self.pagination_attrs)
-
-		if pagination is not None:
-			for link in pagination.find_all('a'):
-				if self.pagination_link_predicate(link):
-					self.__add_tracks_from_page(tracks, req_author, req_title, urllib.parse.urljoin(self.host, link['href']))
-
-
-
-LIGAUDIO_TRACK_SOURCE = SimpleTrackSource(
-	'https://web.ligaudio.ru',
-	'https://web.ligaudio.ru/mp3/',
-	{'itemprop': 'track'},
-	{'itemprop': 'url'},
-	{'class': 'title', 'itemprop': 'name'},
-	{'class': 'autor', 'itemprop': 'byArtist'},
-	{'class': 'd'},
-	{'class': 'pagination'},
-	lambda link: 'this' not in link.get_attribute_list('class')
-)
-
-HITMOS_TRACK_SOURCE = SimpleTrackSource(
-	'https://rus.hitmotop.com',
-	'https://rus.hitmotop.com/search?q=',
-	{'class': 'track__info'},
-	{'class': 'track__download-btn'},
-	{'class': 'track__title'},
-	{'class': 'track__desc'},
-	{'class': 'track__time'},
-	{'class': 'pagination'},
-	lambda _: True
-)
-
-
-def load_tracks(request: str, req_author: Optional[str], req_title: Optional[str]) -> List[Track]:
-	""" Возвращает список треков по запросу """
-
-	tracks = []
+			self.message_id = bot.send_message(chat_id, msg, reply_markup=markup).id
+		else:
+			bot.edit_message_reply_markup(chat_id, self.message_id, reply_markup=markup)
 	
-	LIGAUDIO_TRACK_SOURCE.add_tracks(tracks, request, req_author, req_title)
-	HITMOS_TRACK_SOURCE.add_tracks(tracks, request, req_author, req_title)
 
-	logger.debug(f'Found {len(tracks)} tracks by request `{request}`')
-	return tracks
+	@property
+	def key(self):
+		return str(id(self))

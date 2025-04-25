@@ -8,8 +8,8 @@ from pydub import AudioSegment
 from pydub.utils import mediainfo
 from telebot import TeleBot
 
-from tracks import Track, HEADERS
-from util import Timer
+from tracks import Track
+from util import Timer, HEADERS, add_scheme
 
 
 TARGET_BITRATE = 192000
@@ -18,19 +18,19 @@ MAX_TRIES = 3
 
 logger = logging.getLogger()
 
-def process(track: Track, bot: TeleBot, chat_id: int) -> None:
+def process_track(track: Track, bot: TeleBot, chat_id: int) -> None:
 	""" Скачивает трек по ссылке, затем преобразовывает его в формат TARGET_FORMAT,
 		сжимает до битрейта TARGET_BITRATE и устанавливает метаданные. """
 
 	message_id = bot.send_message(chat_id, 'Скачиваю файл...').id
 
-	global_timer = Timer()
-	global_timer.start()
+	total_timer = Timer()
+	total_timer.start()
 
 	timer = Timer()
 	timer.start()
 
-	response = requests.get(track.url, headers=HEADERS)
+	response = requests.get(add_scheme(track.url), headers=HEADERS)
 
 	if not response.ok:
 		logger.warning(f'Server returned status {response.status_code} on request {track.url}')
@@ -83,4 +83,4 @@ def process(track: Track, bot: TeleBot, chat_id: int) -> None:
 		
 		bot.delete_message(chat_id, message_id)
 	
-	global_timer.stop('Total time')
+	total_timer.stop('Total time')
