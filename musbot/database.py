@@ -76,6 +76,8 @@ def get_track_list(user_id: int, title: Optional[str], author: Optional[str]) ->
 		query += " AND author ILIKE %s ESCAPE '='"
 		args.append(_escape_like_pattern(author))
 	
+	query += " ORDER BY author, title DESC"
+	
 	cursor.execute(query, args)
 	connection.commit()
 	

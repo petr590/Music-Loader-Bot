@@ -5,13 +5,14 @@ import re
 import logging
 
 from telebot import TeleBot, types
-from typing import Dict, Optional
+from typing import Dict
 
 from musbot import database
 from musbot.setup import setup
 from musbot.tracks import Track, TrackPool, button_events
 from musbot.track_loader import load_tracks
 from musbot.track_processor import process_track
+from musbot.actions import Action, ChooseAction, NO_ACTION, ACTION_BY_BUTTON_MESSAGE
 from musbot.util import get_request_title_and_author, wrap_try_except
 
 
@@ -45,14 +46,28 @@ START_MESSAGE = '''
 
 
 class UserState:
+	""" Состояние юзера. Хранит настройки и текущее действие. """
+	
+	# Ключ: id чата, значение: состояние юзера
+	_states: Dict[int, 'UserState'] = {}
+	
 	disable_filter: bool
-	current_track: Optional[Track]
-	current_action: Optional[dict]
+	current_action: Action
 
 	def __init__(self) -> None:
 		self.disable_filter = False
-		self.current_track = None
-		self.current_action = None
+		self.current_action = NO_ACTION
+	
+	@staticmethod
+	def get(user_id: int) -> 'UserState':
+		""" Возвращает состояние юзера по его id. Если такого состояния нет, создаёт его. """
+		
+		state = UserState._states.get(user_id)
+		if state is not None:
+			return state
+		
+		state = UserState._states[user_id] = UserState()
+		return state
 
 
 def main() -> None:
@@ -62,18 +77,6 @@ def main() -> None:
 	ADMIN_ID = int(os.environ.get('ADMIN_ID'))
 	bot = TeleBot(os.environ.get('BOT_TOKEN'))
 	
-	# Ключ: id чата, значение: состояние юзера
-	user_states: Dict[int, UserState] = {}
-
-	assert bool(UserState()) == True
-
-	def get_state(user_id: int) -> UserState:
-		state = user_states.get(user_id)
-		if state is not None:
-			return state
-		
-		state = user_states[user_id] = UserState()
-		return state
 
 	# -------------------------------------------------- Commands --------------------------------------------------
 
@@ -93,14 +96,14 @@ def main() -> None:
 	@bot.message_handler(commands=['filteron'])
 	@wrap_try_except(bot)
 	def filter_on(message: types.Message):
-		get_state(message.from_user.id).disable_filter = False
+		UserState.get(message.from_user.id).disable_filter = False
 		bot.send_message(message.chat.id, 'Фильтр включен')
 
 
 	@bot.message_handler(commands=['filteroff'])
 	@wrap_try_except(bot)
 	def filter_off(message: types.Message):
-		get_state(message.from_user.id).disable_filter = True
+		UserState.get(message.from_user.id).disable_filter = True
 		bot.send_message(message.chat.id, 'Фильтр отключен')
 
 
@@ -108,125 +111,36 @@ def main() -> None:
 	
 	COMMAND_REGEX = re.compile(r'^/\w+\s*')
 
-	def edit_author(track: Track, message: types.Message):
-		track.author = message.text
-		database.update_track(track)
-		return 'Трек изменён'
-
-	
-	def edit_title(track: Track, message: types.Message):
-		track.title = message.text
-		database.update_track(track)
-		return 'Трек изменён'
-	
-	def download(track: Track, message: types.Message):
-		process_track(track, bot, message.chat.id)
-	
-	def delete(track: Track, message: types.Message):
-		if message.text.lower() == 'да':
-			database.delete_track(track)
-			return 'Трек удалён'
-		else:
-			return 'Отмена'
-	
-
-	EDIT_AUTHOR = {
-		'button_message': 'Изменить автора',
-		'begin_message': 'Введите нового автора трека',
-		'keyboard': types.ReplyKeyboardRemove(),
-		'callback': edit_author,
-	}
-
-	EDIT_TITLE = {
-		'button_message': 'Изменить название',
-		'begin_message': 'Введите новое название трека',
-		'keyboard': types.ReplyKeyboardRemove(),
-		'callback': edit_title,
-	}
-
-	DOWNLOAD = {
-		'button_message': 'Скачать',
-		'callback': download,
-	}
-
-	DELETE = {
-		'button_message': 'Удалить',
-		'begin_message': 'Вы уверены?',
-		
-		'keyboard': types.ReplyKeyboardMarkup(resize_keyboard=True).add(
-			types.KeyboardButton('Да'),
-			types.KeyboardButton('Нет'),
-		),
-
-		'callback': delete,
-	}
-
-	ACTION_BY_BUTTON_MESSAGE = {
-		EDIT_AUTHOR['button_message']: EDIT_AUTHOR,
-		EDIT_TITLE ['button_message']: EDIT_TITLE,
-		DOWNLOAD   ['button_message']: DOWNLOAD,
-		DELETE     ['button_message']: DELETE,
-	}
-
 
 	@bot.message_handler(commands=['list'])
 	@wrap_try_except(bot)
 	def track_list(message: types.Message):
-		if message.text is None or message.text == '': return
-		
 		_, title, author = get_request_title_and_author(re.sub(COMMAND_REGEX, '', message.text))
 
 		pool = TrackPool(handle_track_click, database.get_track_list(message.from_user.id, title, author))
 		pool.print_next(bot, message.chat.id)
 	
 
+	# Вызывается при клике на кнопку с треком
 	def handle_track_click(track: Track, bot: TeleBot, chat_id: int, user_id: int):
 		keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
 		keyboard.add(
-			*[types.KeyboardButton(msg) for msg in ACTION_BY_BUTTON_MESSAGE.keys()],
+			*[types.KeyboardButton(msg) for msg in ACTION_BY_BUTTON_MESSAGE],
 			row_width=2
 		)
 
-
 		bot.send_message(chat_id, 'Что вы хотите сделать с треком?', reply_markup=keyboard)
-		get_state(user_id).current_track = track
+		UserState.get(user_id).current_action = ChooseAction(track)
 	
-
-	def text_filter(message: types.Message):
-		return get_state(message.from_user.id).current_track is not None\
-			and message.text in ACTION_BY_BUTTON_MESSAGE
-
 
 	def action_filter(message: types.Message):
-		state = get_state(message.from_user.id)
-		return state.current_track is not None and state.current_action is not None
-
-
-	@bot.message_handler(func=text_filter)
-	@wrap_try_except(bot)
-	def begin_action(message: types.Message):
-		action = ACTION_BY_BUTTON_MESSAGE[message.text]
-		state = get_state(message.from_user.id)
-
-		if 'begin_message' in action:
-			state.current_action = action
-			bot.send_message(message.chat.id, action['begin_message'], reply_markup=action['keyboard'])
-		else:
-			action['callback'](state.current_track, message, reply_markup=types.ReplyKeyboardRemove())
-			state.current_track = None
-	
+		return UserState.get(message.from_user.id).current_action.filter(message)
 
 	@bot.message_handler(func=action_filter)
 	@wrap_try_except(bot)
-	def do_action(message: types.Message):
-		state = get_state(message.from_user.id)
-		end_message = state.current_action['callback'](state.current_track, message)
-
-		state.current_track = None
-		state.current_action = None
-		
-		bot.send_message(message.chat.id, end_message, reply_markup=types.ReplyKeyboardRemove())
+	def handle_action(message: types.Message):
+		state = UserState.get(message.from_user.id)
+		state.current_action = state.current_action.handle_message(message, bot)
 
 
 	# -------------------------------------------------- messages --------------------------------------------------
@@ -235,13 +149,11 @@ def main() -> None:
 	@bot.message_handler()
 	@wrap_try_except(bot)
 	def handle_message(message: types.Message) -> None:
-		if message.text is None or message.text == '': return
-
 		database.add_or_update_user(message.from_user)
 		
 		request, title, author = get_request_title_and_author(message.text)
 		
-		if get_state(message.from_user.id).disable_filter:
+		if UserState.get(message.from_user.id).disable_filter:
 			title = None
 			author = None
 

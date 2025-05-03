@@ -6,7 +6,7 @@ import logging
 from mutagen.easyid3 import EasyID3
 from pydub import AudioSegment
 from pydub.utils import mediainfo
-from telebot import TeleBot
+from telebot import TeleBot, types
 
 from .tracks import Track
 from .util import Timer, HEADERS, add_scheme
@@ -22,7 +22,7 @@ def process_track(track: Track, bot: TeleBot, chat_id: int) -> None:
 	""" Скачивает трек по ссылке, затем преобразовывает его в формат TARGET_FORMAT,
 		сжимает до битрейта TARGET_BITRATE и устанавливает метаданные. """
 
-	message_id = bot.send_message(chat_id, 'Скачиваю файл...').id
+	message_id = bot.send_message(chat_id, 'Скачиваю файл...', reply_markup=types.ReplyKeyboardRemove()).id
 
 	total_timer = Timer()
 	total_timer.start()

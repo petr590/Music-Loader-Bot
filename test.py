@@ -1,9 +1,11 @@
 import re
 
-from util import AUTHOR_NAME_REGEX, AUTHOR_REGEX, TITLE_REGEX, add_scheme, remove_scheme
-from tracks import FORBIDDEN_CHARS_REGEX
+from musbot.util import AUTHOR_NAME_REGEX, AUTHOR_REGEX, TITLE_REGEX, add_scheme, remove_scheme
+from musbot.tracks import FORBIDDEN_CHARS_REGEX
+from timeit import timeit
 
-if __name__ == '__main__':
+
+def test():
 	assert re.sub(AUTHOR_NAME_REGEX, r'\1 | \2', 'ABC - DEF - GHI') == 'ABC | DEF - GHI'
 	assert re.search(AUTHOR_NAME_REGEX, 'ABC - ') is None
 	assert re.search(AUTHOR_NAME_REGEX, ' - ABC') is None
@@ -41,5 +43,31 @@ if __name__ == '__main__':
 	assert remove_scheme('https://host/path?k=v') == 'host/path?k=v'
 	assert remove_scheme('ftp://host/path?k=v')   == 'host/path?k=v'
 	assert remove_scheme('gg://host/path?k=v')    == 'host/path?k=v'
+
+def time_command_regex():
+	COMMAND_REGEX = re.compile(r'^/\w+\s*')
+	str1 = 'Kanaria - Brain' * 100
+	str2 = '/list' + str1
+	str3 = '/' + 'a' * 500
+	
+	def replace_command_1():
+		re.sub(COMMAND_REGEX, '', str1)
+	
+	def replace_command_2():
+		re.sub(COMMAND_REGEX, '', str2)
+	
+	def replace_command_3():
+		re.sub(COMMAND_REGEX, '', str3)
+	
+	time1 = timeit(replace_command_1, number=50000)
+	time2 = timeit(replace_command_2, number=50000)
+	time3 = timeit(replace_command_3, number=50000)
+	
+	print(f'{time1:.3f}s, {time2:.3f}s, {time3:.3f}s: {(time2 - time1) / time1 * 100 :.1f}%, {(time3 - time1) / time1 * 100 :.1f}%')
+
+
+if __name__ == '__main__':
+	test()
+	time_command_regex()
 
 	print('SUCCESS')
