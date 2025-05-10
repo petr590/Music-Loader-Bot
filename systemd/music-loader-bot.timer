@@ -1,0 +1,11 @@
+# Данный файл создан вручную и не является частью какого-либо пакета
+
+[Unit]
+Description=Music Loader Bot Timer
+
+[Timer]
+OnBootSec=15s
+AccuracySec=1s
+
+[Install]
+WantedBy=multi-user.target

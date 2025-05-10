@@ -93,16 +93,17 @@ def main() -> None:
 			database.cleanup()
 			sys.exit(0)
 
+
 	@bot.message_handler(commands=['filteron'])
 	@wrap_try_except(bot)
-	def filter_on(message: types.Message):
+	def filteron(message: types.Message):
 		UserState.get(message.from_user.id).disable_filter = False
 		bot.send_message(message.chat.id, 'Фильтр включен')
 
 
 	@bot.message_handler(commands=['filteroff'])
 	@wrap_try_except(bot)
-	def filter_off(message: types.Message):
+	def filteroff(message: types.Message):
 		UserState.get(message.from_user.id).disable_filter = True
 		bot.send_message(message.chat.id, 'Фильтр отключен')
 

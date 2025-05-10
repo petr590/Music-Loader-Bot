@@ -1,0 +1,17 @@
+# Данный файл создан вручную и не является частью какого-либо пакета
+
+[Unit]
+Description=Music Loader telegram Bot
+Requires=postgresql.service
+Requires=network-online.target
+
+[Service]
+Type=idle
+ExecStart=/home/winch/0x590/programming/python/music-loader-bot/bot.py
+WorkingDirectory=/home/winch/0x590/programming/python/music-loader-bot/
+User=winch
+Group=winch
+Restart=always
+
+[Install]
+WantedBy=multi-user.service
