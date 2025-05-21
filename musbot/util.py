@@ -1,17 +1,21 @@
 import re
+import sys
 import time
 import logging
+import traceback
 
 from telebot import TeleBot, types
 from typing import TypeVar, Callable, Tuple, Optional, Union
+from requests.exceptions import ConnectionError
 
 logger = logging.getLogger('root')
-T = TypeVar('T')
 
 HEADERS = {
 	'Accept': 'text/html',
 	'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_3_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
 }
+
+T = TypeVar('T')
 
 class Timer:
 	def __init__(self) -> None:
@@ -88,17 +92,33 @@ def get_request_title_and_author(text: str) -> Tuple[str, Optional[str], Optiona
 	return request, title, author
 
 
-MsgOrQuery = Union[types.Message, types.CallbackQuery]
-Handler = Callable[[MsgOrQuery], None]
+_last_ex_info = None
 
-def wrap_try_except(bot: TeleBot) -> Callable[[Handler], Handler]:
+def format_last_ex_info() -> Optional[str]:
+	return '\n'.join(traceback.format_exception(*_last_ex_info)) if _last_ex_info else None
+
+
+def _get_ex_user_message(ex: Exception) -> str:
+	""" Возврашает сообщение для пользователя """
+
+	if isinstance(ex, ConnectionError):
+		return 'Ошибка сети'
+	
+	return 'Ошибка'
+
+
+_MsgOrQuery = Union[types.Message, types.CallbackQuery]
+_Handler = Callable[[_MsgOrQuery], None]
+
+def wrap_try_except(bot: TeleBot) -> Callable[[_Handler], _Handler]:
 	"""
 	Возвращает декоратр, который оборачивает вызов функции в try - except.
-	При исключении пишет пользователю сообщение 'Ошибка' и выводит стектрейс об ошибке.
+	При исключении пишет пользователю сообщение 'Ошибка', выводит стектрейс
+	об ошибке в лог, а также сохраняет ошибку и стектрейс в переменные.
 	"""
 
-	def decorator(func: Handler) -> Handler:
-		def wrapper(arg1: MsgOrQuery) -> None:
+	def decorator(func: _Handler) -> _Handler:
+		def wrapper(arg1: _MsgOrQuery) -> None:
 			try:
 				func(arg1)
 			except Exception as ex:
@@ -107,19 +127,22 @@ def wrap_try_except(bot: TeleBot) -> Callable[[Handler], Handler]:
 				else:
 					chat_id = arg1.message.chat.id
 				
+				global _last_ex_info
+				_last_ex_info = sys.exc_info()
+				
 				logger.error(type(ex), exc_info=ex)
-				bot.send_message(chat_id, 'Ошибка')
+				bot.send_message(chat_id, _get_ex_user_message(ex))
 		
 		return wrapper
 	return decorator
 
 
-SCHEME_REGEX = re.compile(r'^\w+://', re.I)
+_SCHEME_REGEX = re.compile(r'^\w+://')
 
 def remove_scheme(url: str) -> str:
 	""" Удаляет схему из url """
-	return re.sub(SCHEME_REGEX, '', url)
+	return re.sub(_SCHEME_REGEX, '', url)
 
 def add_scheme(url: str) -> str:
 	""" Добавляет схему https:// в url, если её нет """
-	return url if re.match(SCHEME_REGEX, url) else 'https://' + url
+	return url if re.match(_SCHEME_REGEX, url) else 'https://' + url

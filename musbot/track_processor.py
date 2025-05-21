@@ -9,7 +9,7 @@ from pydub.utils import mediainfo
 from telebot import TeleBot, types
 
 from .tracks import Track
-from .util import Timer, HEADERS, add_scheme
+from .util import Timer, add_scheme, HEADERS
 
 
 TARGET_BITRATE = 192000

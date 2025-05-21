@@ -5,7 +5,6 @@ from telebot.types import User
 from typing import List, Optional
 
 from .tracks import Track
-from .util import remove_scheme
 
 def init() -> None:
 	global connection, cursor
@@ -31,9 +30,10 @@ def init() -> None:
 						url VARCHAR(2048) NOT NULL,
 						title VARCHAR(2048) NOT NULL,
 						author VARCHAR(2048) NOT NULL,
+						duration SMALLINT,
 						UNIQUE(user_id, url)
 					)""")
-
+	
 	connection.commit()
 
 
@@ -50,12 +50,12 @@ def add_or_update_user(user: User) -> None:
 	connection.commit()
 
 
-def add_track_info(user_id: int, track: Track) -> None:
-	cursor.execute("""INSERT INTO tracks (user_id, url, title, author)
-					  VALUES (%s, %s, %s, %s)
+def add_or_update_track(user_id: int, track: Track) -> None:
+	cursor.execute("""INSERT INTO tracks (user_id, url, title, author, duration)
+					  VALUES (%s, %s, %s, %s, %s)
 					  ON CONFLICT (user_id, url)
-					  DO UPDATE SET title=EXCLUDED.title, author=EXCLUDED.author""",
-				   (user_id, remove_scheme(track.url), track.title, track.author))
+					  DO UPDATE SET title=EXCLUDED.title, author=EXCLUDED.author, duration=EXCLUDED.duration""",
+				   (user_id, track.url, track.title, track.author, track.duration))
 	
 	connection.commit()
 
@@ -65,7 +65,7 @@ def _escape_like_pattern(string: str) -> str:
 
 
 def get_track_list(user_id: int, title: Optional[str], author: Optional[str]) -> List[Track]:
-	query = "SELECT id, url, title, author FROM tracks WHERE user_id = %s"
+	query = "SELECT id, url, title, author, duration FROM tracks WHERE user_id = %s"
 	args = [user_id]
 	
 	if title is not None:
@@ -82,14 +82,14 @@ def get_track_list(user_id: int, title: Optional[str], author: Optional[str]) ->
 	connection.commit()
 	
 	return list(map(
-		lambda row: Track(id=row[0], url=row[1], title=row[2], author=row[3]),
-		cursor.fetchall()
+		lambda row: Track(id=row[0], url=row[1], title=row[2], author=row[3], duration=row[4], is_downloaded=True),
+		cursor
 	))
 
 
 def update_track(track: Track) -> None:
-	cursor.execute("UPDATE tracks SET url=%s, title=%s, author=%s WHERE id=%s",
-				   (track.url, track.title, track.author, track.id))
+	cursor.execute("UPDATE tracks SET url=%s, title=%s, author=%s, duration=%s WHERE id=%s",
+				   (track.url, track.title, track.author, track.duration, track.id))
 
 	connection.commit()
 
@@ -97,3 +97,18 @@ def update_track(track: Track) -> None:
 def delete_track(track: Track) -> None:
 	cursor.execute("DELETE FROM tracks WHERE id=%s", (track.id,))
 	connection.commit()
+
+
+def set_is_downloaded(user_id: int, tracks: List[Track]) -> None:
+	""" Для каждого трека устанавливает is_downloaded в True, если трек есть в базе """
+
+	if len(tracks) == 0: return
+
+	urls = tuple(track.url for track in tracks)
+
+	cursor.execute("SELECT url FROM tracks WHERE user_id=%s AND url IN %s", (user_id, urls))
+	connection.commit()
+	
+	found_urls = set(row[0] for row in cursor)
+	for track in tracks:
+		track.is_downloaded = track.url in found_urls

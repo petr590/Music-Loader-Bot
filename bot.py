@@ -13,7 +13,7 @@ from musbot.tracks import Track, TrackPool, button_events
 from musbot.track_loader import load_tracks
 from musbot.track_processor import process_track
 from musbot.actions import Action, ChooseAction, NO_ACTION, ACTION_BY_BUTTON_MESSAGE
-from musbot.util import get_request_title_and_author, wrap_try_except
+from musbot.util import get_request_title_and_author, wrap_try_except, format_last_ex_info
 
 
 START_MESSAGE = '''
@@ -75,10 +75,11 @@ def main() -> None:
 	database.init()
 
 	ADMIN_ID = int(os.environ.get('ADMIN_ID'))
+	ADMIN_PWD = os.environ.get('ADMIN_PWD')
 	bot = TeleBot(os.environ.get('BOT_TOKEN'))
 	
 
-	# -------------------------------------------------- Commands --------------------------------------------------
+	# ----------------------------------------- Commands ------------------------------------------
 
 	@bot.message_handler(commands=['start'])
 	@wrap_try_except(bot)
@@ -106,9 +107,55 @@ def main() -> None:
 	def filteroff(message: types.Message):
 		UserState.get(message.from_user.id).disable_filter = True
 		bot.send_message(message.chat.id, 'Фильтр отключен')
+	
+
+	@bot.message_handler(commands=['cancel'])
+	@wrap_try_except(bot)
+	def cancel(message: types.Message):
+		UserState.get(message.from_user.id).current_action = NO_ACTION
 
 
-	# -------------------------------------------------- /list --------------------------------------------------
+	# -------------------------------------- Hidden commands --------------------------------------
+	
+	@bot.message_handler(commands=['diag'])
+	@wrap_try_except(bot)
+	def diagnostics(message: types.Message):
+		trace = format_last_ex_info()
+
+		bot.send_message(
+			message.chat.id,
+			f'```\n{trace}\n```' if trace else 'Ошибок нет',
+			parse_mode='MarkdownV2'
+		)
+
+
+	pwd_request = False
+
+	def is_admin(message: types.Message):
+		return message.from_user.id == ADMIN_ID
+
+	@bot.message_handler(commands=['shutdown'], func=is_admin)
+	@wrap_try_except(bot)
+	def shutdown(message: types.Message):
+		nonlocal pwd_request
+		pwd_request = True
+		bot.send_message(message.chat.id, 'Подтвердите пароль')
+	
+	@bot.message_handler(func=lambda message: pwd_request and is_admin(message))
+	@wrap_try_except(bot)
+	def handle_admin_pwd(message: types.Message):
+		pwd_request = False
+
+		if message.text == ADMIN_PWD:
+			bot.send_message(message.chat.id, 'Выключение...')
+			database.cleanup()
+			os.system("systemctl poweroff")
+			sys.exit(0)
+		else:
+			bot.send_message(message.chat.id, 'Пароль неверен')
+
+
+	# ------------------------------------------- /list -------------------------------------------
 	
 	COMMAND_REGEX = re.compile(r'^/\w+\s*')
 
@@ -119,7 +166,7 @@ def main() -> None:
 		_, title, author = get_request_title_and_author(re.sub(COMMAND_REGEX, '', message.text))
 
 		pool = TrackPool(handle_track_click, database.get_track_list(message.from_user.id, title, author))
-		pool.print_next(bot, message.chat.id)
+		pool.print(bot, message.chat.id)
 	
 
 	# Вызывается при клике на кнопку с треком
@@ -144,7 +191,7 @@ def main() -> None:
 		state.current_action = state.current_action.handle_message(message, bot)
 
 
-	# -------------------------------------------------- messages --------------------------------------------------
+	# ----------------------------------------- messages ------------------------------------------
 
 
 	@bot.message_handler()
@@ -157,14 +204,36 @@ def main() -> None:
 		if UserState.get(message.from_user.id).disable_filter:
 			title = None
 			author = None
+		
+		tracks = load_tracks(request, title, author)
+		database.set_is_downloaded(message.from_user.id, tracks)
 
-		pool = TrackPool(process_track_and_save_info, load_tracks(request, title, author))
-		pool.print_next(bot, message.chat.id)
+		pool = TrackPool(process_track_and_save_info, tracks)
+		pool.print(bot, message.chat.id)
 
 
 	def process_track_and_save_info(track: Track, bot: TeleBot, chat_id: int, user_id: int):
 		process_track(track, bot, chat_id)
-		database.add_track_info(user_id, track)
+		database.add_or_update_track(user_id, track)
+	
+
+	# maybe TODO
+	
+	# @bot.message_handler(content_types=['audio'])
+	# def handle_audio(message: types.Message) -> None:
+	# 	audio = message.audio
+	# 	chat_id = message.chat.id
+	# 	user_id = message.from_user.id
+
+	# 	track = Track(url=None, title=audio.title, author=audio.performer, duration=audio.duration)
+
+	# 	if track.author is None:
+	# 		bot.send_message(chat_id, 'Введите автора трека')
+	# 		UserState.get(user_id).current_action = SetAuthorAction(track)
+
+	# 	if track.title is None:
+	# 		bot.send_message(chat_id, 'Введите название трека')
+	# 		UserState.get(user_id).current_action = SetTitleAction(track)
 
 
 	@bot.callback_query_handler(func=lambda _: True)
@@ -177,7 +246,7 @@ def main() -> None:
 			handler(bot, chat_id, query.from_user.id)
 
 
-	# -------------------------------------------------- start --------------------------------------------------
+	# ------------------------------------------- start -------------------------------------------
 
 	logger = logging.getLogger('root')
 	logger.info('Bot successfully started')

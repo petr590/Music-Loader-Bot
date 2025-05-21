@@ -2,6 +2,7 @@ import re
 
 from musbot.util import AUTHOR_NAME_REGEX, AUTHOR_REGEX, TITLE_REGEX, add_scheme, remove_scheme
 from musbot.tracks import FORBIDDEN_CHARS_REGEX
+from musbot.track_loader import TIME_REGEX
 from timeit import timeit
 
 
@@ -66,8 +67,30 @@ def time_command_regex():
 	print(f'{time1:.3f}s, {time2:.3f}s, {time3:.3f}s: {(time2 - time1) / time1 * 100 :.1f}%, {(time3 - time1) / time1 * 100 :.1f}%')
 
 
+def test_time_regex():
+	match = re.search(TIME_REGEX, '01:30')
+	assert match.group(1) == '01'
+	assert match.group(2) == '30'
+
+	match = re.search(TIME_REGEX, '01:30:59')
+	assert match.group(1) == '01'
+	assert match.group(2) == '30'
+	assert match.group(3) == '59'
+
+	match = re.search(TIME_REGEX, '01 : 30')
+	assert match is None
+
+	match = re.search(TIME_REGEX, '85:30')
+	assert match is None
+
+	match = re.search(TIME_REGEX, '0:0')
+	assert match.group(1) == '0'
+	assert match.group(2) == '0'
+
+
 if __name__ == '__main__':
 	test()
-	time_command_regex()
+	test_time_regex()
+	# time_command_regex()
 
 	print('SUCCESS')

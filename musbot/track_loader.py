@@ -8,15 +8,15 @@ from typing import List, Dict, Optional, Callable
 from abc import abstractmethod
 
 from .tracks import Track
-from .util import HEADERS
+from .util import HEADERS, remove_scheme
 
 # Удаляет '//', 'http://' и 'https://' в начале строки, если есть, и добавляет 'https://'
 HREF_REGEX = re.compile(r'^((https?:)?//)?')
 HREF_REPL = 'https://'
 
-# Удаляет ведущие нули
-TIME_REGEX = re.compile(r'^0+([1-9]+(:\d+){1,2})$')
-TIME_REPL = r'\1'
+# Ищет время в строке
+TIME_GROUP = r'([0-5]?\d)'
+TIME_REGEX = re.compile(f'^{TIME_GROUP}:{TIME_GROUP}(?::{TIME_GROUP})?$')
 
 WHITESPACE_REGEX = re.compile(r'\s+')
 
@@ -85,9 +85,17 @@ class SimpleTrackSource(TrackSource):
 			if not _matches(author, req_author):
 				continue
 
-			time = re.sub(TIME_REGEX, TIME_REPL, tag.find(attrs=self.time_attrs).get_text(strip=True))
+			match = re.search(TIME_REGEX, tag.find(attrs=self.time_attrs).get_text(strip=True))
 
-			tracks.append(Track(href, title, author, time))
+			if match is not None:
+				time = int(match.group(1)) * 60 + int(match.group(2))
+
+				if match.group(3):
+					time = time * 60 + int(match.group(3))
+			else:
+				time = None
+
+			tracks.append(Track(remove_scheme(href), title, author, time))
 
 
 	def add_tracks(self, tracks: List[Track], request: str, req_title: Optional[str], req_author: Optional[str]):
@@ -136,6 +144,8 @@ def load_tracks(request: str, req_title: Optional[str], req_author: Optional[str
 	
 	LIGAUDIO_TRACK_SOURCE.add_tracks(tracks, request, req_title, req_author)
 	HITMOS_TRACK_SOURCE.add_tracks(tracks, request, req_title, req_author)
+
+	tracks.sort()
 
 	logger.debug(f'Found {len(tracks)} tracks by request `{request}`')
 	return tracks
