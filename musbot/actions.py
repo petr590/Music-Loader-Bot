@@ -2,9 +2,9 @@ from abc import abstractmethod
 from typing import Dict, Type
 from telebot import TeleBot, types
 
-from . import database
+from . import database, file_manager
 from .tracks import Track
-from .track_processor import process_track
+from .track_processor import send_track
 
 class Action:
 	"""
@@ -34,7 +34,7 @@ class NoAction(Action):
 	"""
 	Представляет отсутствие действия в данный момент.
 	Никогда не обрабатывается, так как метод filter всегда возвращает False.
-	Может быть заменено на друге действие только вручную.
+	Может быть заменено на другое действие только вручную.
 	"""
 
 	def __init__(self) -> None:
@@ -67,8 +67,12 @@ class EditAction(Action):
 			self._second_stage = True
 			return self
 		else:
+			old_track = self.track.copy()
 			self._edit_value(message.text)
+
 			database.update_track(self.track)
+			file_manager.update_track(self.track, old_track)
+
 			bot.send_message(message.chat.id, 'Трек изменён')
 			return NO_ACTION
 	
@@ -108,7 +112,7 @@ class DownloadTrackAction(Action):
 		super().__init__(track)
 
 	def handle_message(self, message: types.Message, bot: TeleBot) -> Action:
-		process_track(self.track, bot, message.chat.id)
+		send_track(self.track, bot, message.chat.id)
 		return NO_ACTION
 
 
@@ -130,6 +134,7 @@ class DeleteTrackAction(Action):
 		
 		if message.text.lower() == 'да':
 			database.delete_track(self.track)
+			file_manager.delete_track(self.track)
 			bot.send_message(message.chat.id, 'Трек удалён', reply_markup=KEYBOARD_REMOVE)
 		else:
 			bot.send_message(message.chat.id, 'Отменено', reply_markup=KEYBOARD_REMOVE)

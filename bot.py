@@ -3,15 +3,15 @@ import os
 import sys
 import re
 import logging
+import atexit
 
 from telebot import TeleBot, types
 from typing import Dict
 
-from musbot import database
-from musbot.setup import setup
+from musbot import setup, database
 from musbot.tracks import Track, TrackPool, button_events
 from musbot.track_loader import load_tracks
-from musbot.track_processor import process_track
+from musbot.track_processor import send_track, download_process_and_send_track
 from musbot.actions import Action, ChooseAction, NO_ACTION, ACTION_BY_BUTTON_MESSAGE
 from musbot.util import get_request_title_and_author, wrap_try_except, format_last_ex_info
 
@@ -71,7 +71,6 @@ class UserState:
 
 
 def main() -> None:
-	setup()
 	database.init()
 
 	ADMIN_ID = int(os.environ.get('ADMIN_ID'))
@@ -113,6 +112,7 @@ def main() -> None:
 	@wrap_try_except(bot)
 	def cancel(message: types.Message):
 		UserState.get(message.from_user.id).current_action = NO_ACTION
+		bot.send_message(message.chat.id, 'Отменено', reply_markup=types.ReplyKeyboardRemove())
 
 
 	# -------------------------------------- Hidden commands --------------------------------------
@@ -144,6 +144,7 @@ def main() -> None:
 	@bot.message_handler(func=lambda message: pwd_request and is_admin(message))
 	@wrap_try_except(bot)
 	def handle_admin_pwd(message: types.Message):
+		nonlocal pwd_request
 		pwd_request = False
 
 		if message.text == ADMIN_PWD:
@@ -164,13 +165,15 @@ def main() -> None:
 	@wrap_try_except(bot)
 	def track_list(message: types.Message):
 		_, title, author = get_request_title_and_author(re.sub(COMMAND_REGEX, '', message.text))
+		user_id = message.from_user.id
 
-		pool = TrackPool(handle_track_click, database.get_track_list(message.from_user.id, title, author))
+		tracks = database.get_track_list(user_id, title, author)
+		pool = TrackPool(user_id=user_id, tracks=tracks, callback=change_track)
 		pool.print(bot, message.chat.id)
 	
 
 	# Вызывается при клике на кнопку с треком
-	def handle_track_click(track: Track, bot: TeleBot, chat_id: int, user_id: int):
+	def change_track(track: Track, bot: TeleBot, chat_id: int, user_id: int):
 		keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
 		keyboard.add(
 			*[types.KeyboardButton(msg) for msg in ACTION_BY_BUTTON_MESSAGE],
@@ -200,21 +203,26 @@ def main() -> None:
 		database.add_or_update_user(message.from_user)
 		
 		request, title, author = get_request_title_and_author(message.text)
+		user_id = message.from_user.id
 		
-		if UserState.get(message.from_user.id).disable_filter:
+		if UserState.get(user_id).disable_filter:
 			title = None
 			author = None
 		
 		tracks = load_tracks(request, title, author)
-		database.set_is_downloaded(message.from_user.id, tracks)
+		database.set_ids(user_id, tracks)
 
-		pool = TrackPool(process_track_and_save_info, tracks)
+		pool = TrackPool(user_id=user_id, tracks=tracks, callback=on_track_clicked)
 		pool.print(bot, message.chat.id)
 
 
-	def process_track_and_save_info(track: Track, bot: TeleBot, chat_id: int, user_id: int):
-		process_track(track, bot, chat_id)
-		database.add_or_update_track(user_id, track)
+	def on_track_clicked(track: Track, bot: TeleBot, chat_id: int, user_id: int):
+		if track.id is None:
+			track.id = database.add_or_update_track(user_id, track)
+			download_process_and_send_track(track, bot, chat_id)
+		else:
+			database.add_or_update_track(user_id, track)
+			change_track(track, bot, chat_id, user_id)
 	
 
 	# maybe TODO
@@ -247,13 +255,19 @@ def main() -> None:
 
 
 	# ------------------------------------------- start -------------------------------------------
+ 
+	TrackPool.init(database.deserialize_track_pools([change_track, on_track_clicked]))
+ 
+	def cleanup():
+		database.serialize_track_pools(TrackPool.get_track_pools())
+		database.cleanup()
 
+	atexit.register(cleanup)
+ 
 	logger = logging.getLogger('root')
 	logger.info('Bot successfully started')
 
 	bot.infinity_polling()
-
-	database.cleanup()
 	
 
 

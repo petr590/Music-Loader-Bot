@@ -31,7 +31,7 @@ class Timer:
 		if self.__start is None:
 			raise ValueError('Timer is not started')
 
-		logger.debug(f'{message}: {end - self.__start} sec')
+		logger.debug(f'{message}: {end - self.__start :.4f} sec')
 		self.__start = None
 	
 	def run(self, message: str, func: Callable[[], T]) -> T:

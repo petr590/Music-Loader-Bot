@@ -93,7 +93,7 @@ class SimpleTrackSource(TrackSource):
 				if match.group(3):
 					time = time * 60 + int(match.group(3))
 			else:
-				time = None
+				time = -1
 
 			tracks.append(Track(remove_scheme(href), title, author, time))
 
@@ -138,13 +138,92 @@ HITMOS_TRACK_SOURCE = SimpleTrackSource(
 )
 
 
+AUTHORS = [
+	'9Lana',
+	'Ado',
+	'Alan Walker',
+	'Alba Sera',
+	'Amala feat. Hatsune Miku, Kasane Teto',
+	'Chiyo',
+	'DECO*27 feat. Hatsune Miku',
+	'Futakuchi Mana',
+	'GUMI',
+	'Harmony Team',
+	'HaruWei',
+	'Hatsune Miku',
+	'Kasane Teto',
+	'Megurine Luka',
+	'higanbanban',
+	'Narea',
+	'Hiiragi Magnetite',
+	'Hinomori Shizuku',
+	'Jackie-O & Sati Akura',
+	'Jinja',
+	'Kagamine Rin',
+	'Kusuriya no Hitorigoto',
+	'[Labor of Love] Hoski',
+	'LIQ feat. Hatsune Miku',
+	'LiuVerdea',
+	'May\'n',
+	'Megurine Luka',
+	'Melody Note',
+	'Miku',
+	'Neoni',
+	'Noisia',
+	'Onsa Media',
+	'Planya Ch',
+	'Reoni, Nyami',
+	'Sati Akura',
+	'SAWTOWNE',
+	'SE[L] EI',
+	'Utsu-P',
+	'Vocaloid',
+	'WEDNESDAY CAMPANELLA',
+	'Yuyoyuppe',
+	'Zephyrianna',
+	'ZHIEND',
+	'ZUTOMAYO',
+	'Ёлка',
+	'Amala',
+]
+
+AUTHOR_NORM_TABLE = [
+	(re.compile(rf'\b{re.escape(author)}\b'), author) for author in AUTHORS
+]
+
+AUTHOR_NORM_TABLE.extend([
+	(re.compile(r'\b黒うさp\b'), 'Kurousa-P'),
+	(re.compile(r'\bplanya channel\b'), 'Planya Ch'),
+])
+
+FEAT_REGEX = re.compile(r'(\w) (?: feat|ft)\. (\w)', re.X)
+FEAT_REPL = r'\1 feat. \2'
+
+SEPARATOR_REGEX = re.compile(r'(\w) (?: \s*[,&]\s* | \s+x\s+) (\w)', re.X)
+SEPARATOR_REPL = r'\1, \2'
+
+def _normalize(track: Track) -> None:
+	author = track.author
+	author = re.sub(FEAT_REGEX, FEAT_REPL, author)
+	author = re.sub(SEPARATOR_REGEX, SEPARATOR_REPL, author)
+	
+	for entry in AUTHOR_NORM_TABLE:
+		author = re.sub(entry[0], entry[1], author)
+	
+	track.author = author
+            
+
+
 def load_tracks(request: str, req_title: Optional[str], req_author: Optional[str]) -> List[Track]:
 	""" Возвращает список треков по запросу """
 	tracks = []
 	
 	LIGAUDIO_TRACK_SOURCE.add_tracks(tracks, request, req_title, req_author)
 	HITMOS_TRACK_SOURCE.add_tracks(tracks, request, req_title, req_author)
-
+ 
+	for track in tracks:
+		_normalize(track)
+	
 	tracks.sort()
 
 	logger.debug(f'Found {len(tracks)} tracks by request `{request}`')

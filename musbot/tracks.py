@@ -1,3 +1,4 @@
+import os
 import re
 
 from telebot import TeleBot
@@ -8,7 +9,7 @@ from .util import word_form_by_num
 
 
 # Символы, запрещённые в именах файлов
-FORBIDDEN_CHARS_REGEX = re.compile(r'[\\|/:*?<>"\x00-\x1F]')
+FORBIDDEN_CHARS_REGEX = re.compile(r'[/\x00-\x1F]' if os.name == 'posix' else r'[\\|/:*?<>"\x00-\x1F]')
 FORBIDDEN_CHARS_REPL = '_'
 
 # Минимальная длина строки для вывода кнопки в Telegram
@@ -18,23 +19,29 @@ button_events: Dict[str, Callable[[TeleBot, int, int], None]] = {}
 
 
 class Track:
-	def __init__(self, url: str, title: str, author: str,
-			  duration: Optional[int] = None,
-			  id: Optional[int] = None,
-			  is_downloaded: bool = False):
-		""" is_downloaded - True, если трек в базе, False, если он не в базе или неизвестно """
-		
+	__last_key = 0
+    
+	def __init__(self, url: str, title: str, author: str, duration: int,
+            	id: Optional[int] = None, keynum: Optional[int] = None):
+
 		self.url = url
 		self.title = title
 		self.author = author
 		self.duration = duration
 		self.id = id
-		self.is_downloaded = is_downloaded
-	
-	@property
-	def key(self) -> int:
-		return str(id(self))
 
+		if keynum is None:
+			Track.__last_key += 1
+			self.keynum = Track.__last_key
+		else:
+			Track.__last_key = max(Track.__last_key, keynum)
+			self.keynum = keynum
+   
+	@property
+	def key(self) -> str:
+		""" Ключ, уникальный для каждого трека. Используется для идентификации кнопки. """
+		return str(self.keynum)
+	
 
 	def format_duration(self) -> str:
 		if self.duration is None:
@@ -48,12 +55,29 @@ class Track:
 	
 	
 	def get_button_message(self) -> str:
-		download_mark = '✅' if self.is_downloaded else ''
+		download_mark = '✅' if self.id is not None else ''
 		msg = f'{download_mark} {self.format_duration()}   ⸺   {self.author}   ⸺   {self.title}'
 		return msg.ljust(MIN_LINE_LENGTH)
+
+	def get_dirname(self) -> str:
+		return re.sub(FORBIDDEN_CHARS_REGEX, FORBIDDEN_CHARS_REPL, self.author)
 	
 	def get_filename(self) -> str:
 		return re.sub(FORBIDDEN_CHARS_REGEX, FORBIDDEN_CHARS_REPL, f'{self.author} - {self.title}')
+	
+
+	@staticmethod
+	def __compare_str_ignorecase(str1: str, str2: str) -> Optional[bool]:
+		low1 = str1.lower()
+		low2 = str2.lower()
+
+		if low1 < low2: return True
+		if low1 > low2: return False
+
+		if str1 < str2: return True
+		if str1 > str2: return False
+
+		return None
 	
 	
 	def __lt__(self, track: object) -> bool:
@@ -62,11 +86,11 @@ class Track:
 		if not isinstance(track, Track):
 			return NotImplemented
 		
-		if self.author < track.author: return True
-		if self.author > track.author: return False
+		res = Track.__compare_str_ignorecase(self.author, track.author)
+		if res is not None: return res
 
-		if self.title < track.title: return True
-		if self.title > track.title: return False
+		res = Track.__compare_str_ignorecase(self.title, track.title)
+		if res is not None: return res
 
 		if self.duration is not None and track.duration is not None:
 			if self.duration < track.duration: return True
@@ -97,34 +121,73 @@ class Track:
 	def __ne__(self, track: object) -> bool:
 		return not(self == track)
 
+	def copy(self) -> 'Track':
+		return Track(self.url, self.title, self.author, self.duration, self.id, self.keynum)
+
 
 # Размер одной страницы при выводе списка треков
+# Примечание: у телеграма есть ограничение на ~55 строк кнопок
 PAGE_SIZE = 10
-
-# Ограничение телеграма на ~55 кнопок (минус 2 кнопки "Свернуть" и "Показать ещё")
-MAX_KEYBOARD_SIZE = 53
 
 class TrackPool:
 	""" Хранит список треков и номер последнего трека, показанного пользователю """
 
-	def __init__(self, callback: Callable[[Track, TeleBot, int, int], None], tracks: List[Track]):
-		self.tracks = tracks
-		self.max_pages = (len(tracks) + PAGE_SIZE - 1) // PAGE_SIZE
-		self.page = 0
-		self.hidden = False
-		self.message_id: Optional[int] = None
+	Callback = Callable[[Track, TeleBot, int, int], None]
 
-		for track in tracks:
-			button_events[track.key] = lambda *args, _track = track: callback(_track, *args)
+	__track_pools: Dict[int, 'TrackPool'] = []
+	__last_id = 0
+ 
+	@staticmethod
+	def init(track_pools: Dict[int, 'TrackPool']) -> None:
+		TrackPool.__track_pools = track_pools
+		TrackPool.__last_id = max(track_pools.keys()) if len(track_pools) > 0 else 0
+
+		for pool in track_pools.values():
+			pool._setup_callbacks()
+   
+	@staticmethod
+	def get_track_pools() -> Dict[int, 'TrackPool']:
+		return TrackPool.__track_pools
+   
+
+	def __init__(self, user_id: int, callback: Callback, tracks: List[Track] = [],
+			  id: Optional[int] = None, message_id: Optional[int] = None, page: Optional[int] = None):
+		
+		if id is None:
+			TrackPool.__last_id += 1
+			id = TrackPool.__last_id
+			
+		self.id = id
+		self.callback = callback
+		self.tracks = tracks
+		self.user_id = user_id
+		self.message_id = message_id
+		self.page = page or 0
+		self.max_pages = (len(tracks) + PAGE_SIZE - 1) // PAGE_SIZE
+
+		self._setup_callbacks()
 		
 		if len(tracks) > 0:
+			TrackPool.__track_pools[id] = self
+   
+   
+	def add_track(self, track: Track) -> None:
+		self.tracks.append(track)
+		self.max_pages = (len(self.tracks) + PAGE_SIZE - 1) // PAGE_SIZE
+   
+   
+	def _setup_callbacks(self) -> None:
+		for track in self.tracks:
+			button_events[track.key] = lambda *args, _track = track: self.callback(_track, *args)
+		
+		if len(self.tracks) > 0:
 			button_events[self.key_print_next] = self.print_next
 			button_events[self.key_print_prev] = self.print_prev
 			button_events[self.key_delete]     = self.delete
 	
 
 	def print(self, bot: TeleBot, chat_id: int):
-		""" Выводит группу треков и кнопку "Скрыть" """
+		""" Выводит группу треков, кнопку "Скрыть" и кнопки "Вперёд"/"Назад" """
 
 		tracks_count = len(self.tracks)
 		keyboard = self._create_keyboard() if tracks_count > 0 else None
@@ -144,7 +207,7 @@ class TrackPool:
 
 	def _create_keyboard(self):
 		keyboard = InlineKeyboardMarkup()
-		keyboard.add(InlineKeyboardButton('Скрыть',  callback_data=self.key_delete))
+		keyboard.add(InlineKeyboardButton('Скрыть', callback_data=self.key_delete))
 
 		for i in range(self.page * PAGE_SIZE, min(len(self.tracks), (self.page + 1) * PAGE_SIZE)):
 			track = self.tracks[i]
@@ -153,9 +216,9 @@ class TrackPool:
 
 		if self.max_pages > 1:
 			but_prev =\
-				InlineKeyboardButton('← Назад',  callback_data=self.key_print_prev)\
+				InlineKeyboardButton('← Назад', callback_data=self.key_print_prev)\
 				if self.page > 0 else\
-				InlineKeyboardButton(' ',  callback_data='none')
+				InlineKeyboardButton(' ', callback_data='none')
 			
 			but_page = InlineKeyboardButton(f'{self.page + 1}/{self.max_pages}', callback_data='none')
 
@@ -172,7 +235,7 @@ class TrackPool:
 
 	def print_next(self, bot: TeleBot, chat_id: int, *_):
 		""" Выводит следующую группу треков """
-		self.page = min(self.max_pages, self.page + 1)
+		self.page = min(self.max_pages - 1, self.page + 1)
 		self.print(bot, chat_id)
 
 	def print_prev(self, bot: TeleBot, chat_id: int, *_):
@@ -183,16 +246,17 @@ class TrackPool:
 	
 	def delete(self, bot: TeleBot, chat_id: int, *_):
 		bot.delete_message(chat_id, self.message_id)
+		TrackPool.__track_pools.pop(self.id, None)
 	
 
 	@property
 	def key_print_next(self):
-		return str(id(self)) + '_print_next'
+		return str(self.id) + '_print_next'
 
 	@property
 	def key_print_prev(self):
-		return str(id(self)) + '_print_prev'
+		return str(self.id) + '_print_prev'
 
 	@property
 	def key_delete(self):
-		return str(id(self)) + '_delete'
+		return str(self.id) + '_delete'

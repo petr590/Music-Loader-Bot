@@ -18,4 +18,6 @@ def setup():
 	
 	logger = logging.getLogger('root')
 	logger.addHandler(handler)
-	logger.setLevel(logging.INFO)
+	logger.setLevel(logging.DEBUG)
+
+setup()
