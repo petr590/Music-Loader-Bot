@@ -1,5 +1,5 @@
 #!/bin/python3
-import os.path
+import os
 
 from musbot import database, file_manager
 

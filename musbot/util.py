@@ -4,7 +4,8 @@ import time
 import logging
 import traceback
 
-from telebot import TeleBot, types
+from telebot import TeleBot
+from telebot.types import ReplyKeyboardRemove, Message, CallbackQuery
 from typing import TypeVar, Callable, Tuple, Optional, Union
 from requests.exceptions import ConnectionError
 
@@ -14,6 +15,9 @@ HEADERS = {
 	'Accept': 'text/html',
 	'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_3_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
 }
+
+KEYBOARD_REMOVE = ReplyKeyboardRemove()
+
 
 T = TypeVar('T')
 
@@ -107,14 +111,14 @@ def _get_ex_user_message(ex: Exception) -> str:
 	return 'Ошибка'
 
 
-_MsgOrQuery = Union[types.Message, types.CallbackQuery]
+_MsgOrQuery = Union[Message, CallbackQuery]
 _Handler = Callable[[_MsgOrQuery], None]
 
 def wrap_try_except(bot: TeleBot) -> Callable[[_Handler], _Handler]:
 	"""
-	Возвращает декоратр, который оборачивает вызов функции в try - except.
-	При исключении пишет пользователю сообщение 'Ошибка', выводит стектрейс
-	об ошибке в лог, а также сохраняет ошибку и стектрейс в переменные.
+	Возвращает декоратор, который оборачивает вызов функции в try - except.
+	При исключении пишет пользователю сообщение об ошибке, выводит стектрейс
+	в лог, а также сохраняет ошибку и стектрейс в переменные.
 	"""
 
 	def decorator(func: _Handler) -> _Handler:
@@ -122,7 +126,7 @@ def wrap_try_except(bot: TeleBot) -> Callable[[_Handler], _Handler]:
 			try:
 				func(arg1)
 			except Exception as ex:
-				if isinstance(arg1, types.Message):
+				if isinstance(arg1, Message):
 					chat_id = arg1.chat.id
 				else:
 					chat_id = arg1.message.chat.id
@@ -131,7 +135,7 @@ def wrap_try_except(bot: TeleBot) -> Callable[[_Handler], _Handler]:
 				_last_ex_info = sys.exc_info()
 				
 				logger.error(type(ex), exc_info=ex)
-				bot.send_message(chat_id, _get_ex_user_message(ex))
+				bot.send_message(chat_id, _get_ex_user_message(ex), reply_markup=KEYBOARD_REMOVE)
 		
 		return wrapper
 	return decorator

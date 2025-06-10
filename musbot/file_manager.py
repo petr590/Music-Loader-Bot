@@ -1,7 +1,6 @@
-import os
 import os.path
-import logging
 import requests
+import logging
 
 from typing import Optional
 from mutagen.easyid3 import EasyID3
@@ -20,7 +19,7 @@ def get_track_path(track: Track) -> str:
 	return os.path.join(TRACKS_DIR, 'DB', str(track.id) + EXT)
 
 def _get_symlink_path(track: Track) -> str:
-	return os.path.join(os.path.join(TRACKS_DIR, track.get_dirname(), track.get_filename()))
+	return os.path.join(os.path.join(TRACKS_DIR, track.get_dirname(), track.get_filename() + EXT))
 
 
 def _remove_if_exists(path: str) -> None:

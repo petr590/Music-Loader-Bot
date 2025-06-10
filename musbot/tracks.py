@@ -5,7 +5,7 @@ from telebot import TeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import List, Dict, Optional, Callable
 
-from .util import word_form_by_num
+from .util import word_form_by_num, KEYBOARD_REMOVE
 
 
 # Символы, запрещённые в именах файлов
@@ -150,8 +150,11 @@ class TrackPool:
 		return TrackPool.__track_pools
    
 
-	def __init__(self, user_id: int, callback: Callback, tracks: List[Track] = [],
-			  id: Optional[int] = None, message_id: Optional[int] = None, page: Optional[int] = None):
+	def __init__(self, user_id: int, callback: Callback, tracks: List[Track] = None,
+			id: Optional[int] = None, message_id: Optional[int] = None, page: Optional[int] = None):
+		
+		if tracks is None:
+			tracks = []
 		
 		if id is None:
 			TrackPool.__last_id += 1
@@ -245,7 +248,7 @@ class TrackPool:
 	
 	
 	def delete(self, bot: TeleBot, chat_id: int, *_):
-		bot.delete_message(chat_id, self.message_id)
+		bot.edit_message_reply_markup(chat_id, self.message_id, reply_markup=InlineKeyboardMarkup())
 		TrackPool.__track_pools.pop(self.id, None)
 	
 

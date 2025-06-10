@@ -5,6 +5,7 @@ from telebot import TeleBot, types
 from . import database, file_manager
 from .tracks import Track
 from .track_processor import send_track
+from .util  import KEYBOARD_REMOVE
 
 class Action:
 	"""
@@ -54,8 +55,6 @@ class NoAction(Action):
 # Единственный экземпляр класса
 NO_ACTION = NoAction()
 
-KEYBOARD_REMOVE = types.ReplyKeyboardRemove()
-
 class EditAction(Action):
 	def __init__(self, track: Track) -> None:
 		super().__init__(track)
@@ -73,7 +72,7 @@ class EditAction(Action):
 			database.update_track(self.track)
 			file_manager.update_track(self.track, old_track)
 
-			bot.send_message(message.chat.id, 'Трек изменён')
+			bot.send_message(message.chat.id, 'Трек изменён', reply_markup=KEYBOARD_REMOVE)
 			return NO_ACTION
 	
 	@abstractmethod
@@ -132,7 +131,8 @@ class DeleteTrackAction(Action):
 			self._second_stage = True
 			return self
 		
-		if message.text.lower() == 'да':
+		answer = message.text.lower().strip()
+		if answer == 'да' or answer == 'yes':
 			database.delete_track(self.track)
 			file_manager.delete_track(self.track)
 			bot.send_message(message.chat.id, 'Трек удалён', reply_markup=KEYBOARD_REMOVE)

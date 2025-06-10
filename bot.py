@@ -1,19 +1,21 @@
 #!/bin/python3
+import re
 import os
 import sys
-import re
 import logging
 import atexit
 
-from telebot import TeleBot, types
 from typing import Dict
+from telebot import TeleBot
+from telebot.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 
 from musbot import setup, database
 from musbot.tracks import Track, TrackPool, button_events
 from musbot.track_loader import load_tracks
-from musbot.track_processor import send_track, download_process_and_send_track
+from musbot.track_processor import download_process_and_send_track
 from musbot.actions import Action, ChooseAction, NO_ACTION, ACTION_BY_BUTTON_MESSAGE
-from musbot.util import get_request_title_and_author, wrap_try_except, format_last_ex_info
+from musbot.util import get_request_title_and_author, wrap_try_except,\
+		format_last_ex_info, KEYBOARD_REMOVE
 
 
 START_MESSAGE = '''
@@ -82,13 +84,13 @@ def main() -> None:
 
 	@bot.message_handler(commands=['start'])
 	@wrap_try_except(bot)
-	def start(message: types.Message) -> None:
+	def start(message: Message) -> None:
 		bot.send_message(message.chat.id, START_MESSAGE, parse_mode='HTML')
 
 
 	@bot.message_handler(commands=['stop'])
 	@wrap_try_except(bot)
-	def stop(message: types.Message):
+	def stop(message: Message):
 		if message.from_user.id == ADMIN_ID:
 			database.cleanup()
 			sys.exit(0)
@@ -96,30 +98,30 @@ def main() -> None:
 
 	@bot.message_handler(commands=['filteron'])
 	@wrap_try_except(bot)
-	def filteron(message: types.Message):
+	def filteron(message: Message):
 		UserState.get(message.from_user.id).disable_filter = False
 		bot.send_message(message.chat.id, 'Фильтр включен')
 
 
 	@bot.message_handler(commands=['filteroff'])
 	@wrap_try_except(bot)
-	def filteroff(message: types.Message):
+	def filteroff(message: Message):
 		UserState.get(message.from_user.id).disable_filter = True
 		bot.send_message(message.chat.id, 'Фильтр отключен')
 	
 
 	@bot.message_handler(commands=['cancel'])
 	@wrap_try_except(bot)
-	def cancel(message: types.Message):
+	def cancel(message: Message):
 		UserState.get(message.from_user.id).current_action = NO_ACTION
-		bot.send_message(message.chat.id, 'Отменено', reply_markup=types.ReplyKeyboardRemove())
+		bot.send_message(message.chat.id, 'Отменено', reply_markup=KEYBOARD_REMOVE)
 
 
 	# -------------------------------------- Hidden commands --------------------------------------
 	
 	@bot.message_handler(commands=['diag'])
 	@wrap_try_except(bot)
-	def diagnostics(message: types.Message):
+	def diagnostics(message: Message):
 		trace = format_last_ex_info()
 
 		bot.send_message(
@@ -131,29 +133,29 @@ def main() -> None:
 
 	pwd_request = False
 
-	def is_admin(message: types.Message):
+	def is_admin(message: Message):
 		return message.from_user.id == ADMIN_ID
 
 	@bot.message_handler(commands=['shutdown'], func=is_admin)
 	@wrap_try_except(bot)
-	def shutdown(message: types.Message):
+	def shutdown(message: Message):
 		nonlocal pwd_request
 		pwd_request = True
-		bot.send_message(message.chat.id, 'Подтвердите пароль')
+		bot.send_message(message.chat.id, 'Подтвердите пароль', reply_markup=KEYBOARD_REMOVE)
 	
 	@bot.message_handler(func=lambda message: pwd_request and is_admin(message))
 	@wrap_try_except(bot)
-	def handle_admin_pwd(message: types.Message):
+	def handle_admin_pwd(message: Message):
 		nonlocal pwd_request
 		pwd_request = False
 
 		if message.text == ADMIN_PWD:
-			bot.send_message(message.chat.id, 'Выключение...')
+			bot.send_message(message.chat.id, 'Выключение...', reply_markup=KEYBOARD_REMOVE)
 			database.cleanup()
 			os.system("systemctl poweroff")
 			sys.exit(0)
 		else:
-			bot.send_message(message.chat.id, 'Пароль неверен')
+			bot.send_message(message.chat.id, 'Пароль неверен', reply_markup=KEYBOARD_REMOVE)
 
 
 	# ------------------------------------------- /list -------------------------------------------
@@ -163,7 +165,7 @@ def main() -> None:
 
 	@bot.message_handler(commands=['list'])
 	@wrap_try_except(bot)
-	def track_list(message: types.Message):
+	def track_list(message: Message):
 		_, title, author = get_request_title_and_author(re.sub(COMMAND_REGEX, '', message.text))
 		user_id = message.from_user.id
 
@@ -174,9 +176,9 @@ def main() -> None:
 
 	# Вызывается при клике на кнопку с треком
 	def change_track(track: Track, bot: TeleBot, chat_id: int, user_id: int):
-		keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+		keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 		keyboard.add(
-			*[types.KeyboardButton(msg) for msg in ACTION_BY_BUTTON_MESSAGE],
+			*[KeyboardButton(msg) for msg in ACTION_BY_BUTTON_MESSAGE],
 			row_width=2
 		)
 
@@ -184,12 +186,12 @@ def main() -> None:
 		UserState.get(user_id).current_action = ChooseAction(track)
 	
 
-	def action_filter(message: types.Message):
+	def action_filter(message: Message):
 		return UserState.get(message.from_user.id).current_action.filter(message)
 
 	@bot.message_handler(func=action_filter)
 	@wrap_try_except(bot)
-	def handle_action(message: types.Message):
+	def handle_action(message: Message):
 		state = UserState.get(message.from_user.id)
 		state.current_action = state.current_action.handle_message(message, bot)
 
@@ -199,7 +201,7 @@ def main() -> None:
 
 	@bot.message_handler()
 	@wrap_try_except(bot)
-	def handle_message(message: types.Message) -> None:
+	def handle_message(message: Message) -> None:
 		database.add_or_update_user(message.from_user)
 		
 		request, title, author = get_request_title_and_author(message.text)
@@ -225,28 +227,10 @@ def main() -> None:
 			change_track(track, bot, chat_id, user_id)
 	
 
-	# maybe TODO
-	
-	# @bot.message_handler(content_types=['audio'])
-	# def handle_audio(message: types.Message) -> None:
-	# 	audio = message.audio
-	# 	chat_id = message.chat.id
-	# 	user_id = message.from_user.id
-
-	# 	track = Track(url=None, title=audio.title, author=audio.performer, duration=audio.duration)
-
-	# 	if track.author is None:
-	# 		bot.send_message(chat_id, 'Введите автора трека')
-	# 		UserState.get(user_id).current_action = SetAuthorAction(track)
-
-	# 	if track.title is None:
-	# 		bot.send_message(chat_id, 'Введите название трека')
-	# 		UserState.get(user_id).current_action = SetTitleAction(track)
-
 
 	@bot.callback_query_handler(func=lambda _: True)
 	@wrap_try_except(bot)
-	def handle_callback(query: types.CallbackQuery) -> None:
+	def handle_callback(query: CallbackQuery) -> None:
 		chat_id = query.message.chat.id
 		handler = button_events.get(query.data)
 

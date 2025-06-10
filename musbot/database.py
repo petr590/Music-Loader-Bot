@@ -109,10 +109,13 @@ def get_track_list(user_id: int, title: Optional[str], author: Optional[str]) ->
 	cursor.execute(query, args)
 	connection.commit()
 	
-	return list(map(
+	tracks = list(map(
 		lambda row: Track(id=row[0], url=row[1], title=row[2], author=row[3], duration=row[4]),
 		cursor
 	))
+
+	tracks.sort()
+	return tracks
 
 
 def update_track(track: Track) -> None:
@@ -177,6 +180,9 @@ def serialize_track_pools(track_pools: Dict[int, TrackPool]) -> None:
 				FROM (VALUES {args}) AS tmp {fields}
 				LEFT JOIN tracks ON saved_id=tracks.id
     	""")
+    
+	track_count = sum(1 for pool in track_pools.values() for track in pool.tracks)
+	logger.debug(f'Saved {len(track_pools)} track pools and {track_count} tracks')
 
 	connection.commit()
 

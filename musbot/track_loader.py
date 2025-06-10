@@ -3,9 +3,9 @@ import requests
 import logging
 import re
 
+from abc import abstractmethod
 from bs4 import BeautifulSoup, Tag
 from typing import List, Dict, Optional, Callable
-from abc import abstractmethod
 
 from .tracks import Track
 from .util import HEADERS, remove_scheme
@@ -143,9 +143,9 @@ AUTHORS = [
 	'Ado',
 	'Alan Walker',
 	'Alba Sera',
-	'Amala feat. Hatsune Miku, Kasane Teto',
+	'Amala',
 	'Chiyo',
-	'DECO*27 feat. Hatsune Miku',
+	'DECO*27',
 	'Futakuchi Mana',
 	'GUMI',
 	'Harmony Team',
@@ -162,7 +162,7 @@ AUTHORS = [
 	'Kagamine Rin',
 	'Kusuriya no Hitorigoto',
 	'[Labor of Love] Hoski',
-	'LIQ feat. Hatsune Miku',
+	'LIQ',
 	'LiuVerdea',
 	'May\'n',
 	'Megurine Luka',
@@ -172,7 +172,8 @@ AUTHORS = [
 	'Noisia',
 	'Onsa Media',
 	'Planya Ch',
-	'Reoni, Nyami',
+	'Reoni',
+	'Nyami',
 	'Sati Akura',
 	'SAWTOWNE',
 	'SE[L] EI',
@@ -184,11 +185,10 @@ AUTHORS = [
 	'ZHIEND',
 	'ZUTOMAYO',
 	'Ёлка',
-	'Amala',
 ]
 
 AUTHOR_NORM_TABLE = [
-	(re.compile(rf'\b{re.escape(author)}\b'), author) for author in AUTHORS
+	(re.compile(rf'\b{re.escape(author)}\b', re.I), author) for author in AUTHORS
 ]
 
 AUTHOR_NORM_TABLE.extend([
